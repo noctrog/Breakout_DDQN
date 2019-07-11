@@ -9,7 +9,7 @@ import collections
 import torch
 import torch.nn as nn
 
-DEFAULT_ENV_NAME = "BreakoutNoFrameskip-v4"
+DEFAULT_ENV_NAME = "PongNoFrameskip-v4"
 
 class Agent:
     def __init__(self, env):
@@ -45,8 +45,8 @@ def main():
     agent = Agent(wrappers.make_env(DEFAULT_ENV_NAME))
 
     net = model.DQN(agent.env.observation_space.shape, agent.env.action_space.n).to(device)
-    # state_dict = torch.load("./BreakoutNoFrameskip-v4-best.dat")
-    # net.load_state_dict(state_dict)
+    state_dict = torch.load(DEFAULT_ENV_NAME + "-best.dat")
+    net.load_state_dict(state_dict)
 
     frame_idx = 0
     ts_frame = 0.0
