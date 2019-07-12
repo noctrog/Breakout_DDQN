@@ -9,6 +9,9 @@ class SumTree:
         self.tree = np.zeros(2 * capacity - 1)
         self.data = np.zeros(capacity, dtype=object)
 
+    def __len__(self):
+        return self.capacity
+
     def _propagate(self, idx, change):
         parent = (idx - 1) // 2
         self.tree[parent] += change
@@ -65,11 +68,20 @@ class PrioritizedReplayBuffer(object):
 
     def __init__(self, capacity):
         self.tree = SumTree(capacity)
+        self.empty = True
+
+    def __len__(self):
+        return len(self.tree)
 
     def _get_priority(self, error):
         return (error + self.PRB_e) ** self.PRB_alpha
 
+    def max_priority(self):
+        return np.max(self.tree.tree[-self.tree.capacity:])
+
     def add(self, error, experience):
+        self.empty = False
+
         priority = self._get_priority(error)
         self.tree.add(priority, experience)
 
@@ -96,7 +108,7 @@ class PrioritizedReplayBuffer(object):
             b_ISWeights[i, 0] = np.power(n * sampling_probabilities, -self.PRB_beta) / max_weight
             b_idx[i] = index
 
-            experience = [data]
+            experience = data
             batch.append(experience)
 
         return b_idx, batch, b_ISWeights
@@ -107,10 +119,4 @@ class PrioritizedReplayBuffer(object):
         ps = np.power(clipped_errors, self.PRB_alpha)
 
         for tim, p in zip(tree_idx, ps):
-            self.tree.update(ti, p)
-
-
-
-
-
-
+            self.tree.update(tim, p)

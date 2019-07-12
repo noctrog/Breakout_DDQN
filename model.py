@@ -96,3 +96,50 @@ class DQN(nn.Module):
 
         x = self.conv(x).view(x.size()[0], -1)
         return self.classifier(x)
+
+
+def calc_loss(batch, batch_weights, net, tgt_net, gamma, double=False, device="cpu"):
+    # states, actions, rewards, dones, next_states = zip(*batch)
+    states, actions, rewards, dones, next_states = unpack_batch(batch)
+
+    # create Tensors and move to GPU if available
+    states_v = torch.tensor(states).to(device)
+    actions_v = torch.tensor(actions).to(device)
+    rewards_v = torch.tensor(rewards).to(device)
+    next_states_v = torch.tensor(next_states).to(device)
+    batch_weights_v = torch.tensor(batch_weights).to(device)
+    done_mask = torch.ByteTensor(dones).to(device)
+
+    # Q values predictions with net
+    state_action_value = net(states_v).gather(1, actions_v.unsqueeze(-1)).squeeze(-1)
+    if double:
+        argmax_v = net(next_states_v).max(dim=1)[1]
+        tgt_q = tgt_net(next_states_v).gather(1, argmax_v.unsqueeze(-1)).squeeze(-1)
+        tgt_q[done_mask] = 0.0              # if this is not done, training will not converge
+        tgt_q = tgt_q.detach()              # target network is not trained
+    else:
+        tgt_q = tgt_net(next_states_v).max(dim=1)[0]
+        tgt_q[done_mask] = 0.0
+        tgt_q = tgt_q.detach()
+
+    # Bellman equation
+    expected_state_action_values = rewards_v + gamma * tgt_q
+    losses_v = batch_weights_v.squeeze(-1) * (state_action_value - expected_state_action_values) ** 2
+    return losses_v.mean(), losses_v + 1e-5
+
+def unpack_batch(batch):
+    states, actions, rewards, dones, new_states = [], [], [], [], []
+
+    for exp in batch:
+        state = np.array(exp.state, copy=False)
+        states.append(state)
+        actions.append(exp.action)
+        rewards.append(exp.reward)
+        dones.append(exp.new_state is None)
+        if exp.new_state is None:
+            new_states.append(state)
+        else:
+            new_states.append(np.array(exp.new_state, copy=False))
+
+    return np.array(states, copy=False), np.array(actions), np.array(rewards, dtype=np.float32),\
+            np.array(dones, dtype=np.uint8), np.array(new_states, copy=False)

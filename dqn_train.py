@@ -1,5 +1,6 @@
 import model
 import wrappers
+import common
 
 import argparse
 import time
@@ -43,20 +44,6 @@ class ExperienceBuffer:
         return  np.array(states), np.array(actions), np.array(rewards, dtype=np.float32), \
                 np.array(dones, dtype=np.uint8), np.array(new_state)
 
-class ExperienceSource:
-    def __init__(self, env, agent, steps_count=2):
-        assert isinstance(env, gym.Env)
-        assert isinstance(agent, model.DQN)
-        assert isinstance(steps_count, int)
-
-        self.env = env
-        self.agent = agent
-        self.steps_count = steps_count
-
-    def __iter__(self):
-        state, action, reward, new_state = [], [], [], []
-
-
 class Agent:
     def __init__(self, env, exp_buffer):
         self.env = env
@@ -70,10 +57,6 @@ class Agent:
     def play_step(self, net, epsilon=0.0, device="cpu"):
         done_reward = None
 
-        # select action (random or from net depending on greediness)
-        # if np.random.random() < epsilon:
-            # action = self.env.action_space.sample()
-        # else:
         state_a = np.array([self.state], copy=False)    # [] adds dimension for batch (?)
         state_v = torch.tensor(state_a).to(device)
         q_vals_v = net(state_v)
@@ -86,7 +69,8 @@ class Agent:
 
         # save experience in the experience buffer
         experience = Experience(self.state, action, reward, is_done, new_state)
-        self.exp_buffer.append(experience)
+        error = self.exp_buffer.max_priority() if not self.exp_buffer.empty else 1.0
+        self.exp_buffer.add(error, experience)
         self.state = new_state
 
         # reset environment and return total reward if finished
@@ -96,28 +80,6 @@ class Agent:
 
         return done_reward
 
-def calc_loss(batch, net, tgt_net, device="cpu"):
-    states, actions, rewards, dones, next_states = batch
-
-    # create Tensors and move to GPU if available
-    states_v = torch.tensor(states).to(device)
-    actions_v = torch.tensor(actions).to(device)
-    rewards_v = torch.tensor(rewards).to(device)
-    next_states_v = torch.tensor(next_states).to(device)
-    done_mask = torch.ByteTensor(dones).to(device)
-
-    # Q values predictions with net
-    state_action_value = net(states_v).gather(1, actions_v.unsqueeze(-1)).squeeze(-1)
-    # Values of the most valued states predicted by the target net
-    argmax_v = net(next_states_v).max(dim=1)[1]
-    tgt_q = tgt_net(next_states_v).gather(1, argmax_v.unsqueeze(-1)).squeeze(-1)
-    tgt_q[done_mask] = 0.0              # if this is not done, training will not converge
-    tgt_q =tgt_q.detach()  # target network is not trained
-
-    # Bellman equation
-    expected_state_action_values = rewards_v + GAMMA * tgt_q
-    return nn.MSELoss()(state_action_value, expected_state_action_values)
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cuda", default=False, action="store_true", help="Enable CUDA")
@@ -126,6 +88,7 @@ def main():
     parser.add_argument("--reward", type=float, default=MEAN_REWARD_BOUND, help="Mean reward\
                         boundary to stop training. Default = %.2f" % MEAN_REWARD_BOUND)
     parser.add_argument("--play_steps", type=int, default=4, help="Number of plays each step (increases batch size)")
+    parser.add_argument("--double", default=False, action="store_true", help="Use Double DQN")
     args = parser.parse_args()
 
     # use CUDA if asked
@@ -149,7 +112,8 @@ def main():
     # print the net architecture for feedback
     print(net)
 
-    buffer = ExperienceBuffer(REPLAY_SIZE)
+    # buffer = ExperienceBuffer(REPLAY_SIZE)
+    buffer = common.PrioritizedReplayBuffer(REPLAY_SIZE)
     agent = Agent(env, buffer)
 
     optimizer = optim.Adam(net.parameters(), lr=LR)
@@ -204,10 +168,12 @@ def main():
             tgt_net.load_state_dict(net.state_dict())
 
         optimizer.zero_grad()
-        batch = buffer.sample(BATCH_SIZE * args.play_steps)
-        loss = calc_loss(batch, net, tgt_net, device)
+        batch_idx, batch, batch_weights = buffer.sample(BATCH_SIZE * args.play_steps)
+        loss, sample_prios_v = model.calc_loss(batch, batch_weights, net, tgt_net, GAMMA, double=args.double, device=device)
         loss.backward()
         optimizer.step()
+
+        agent.exp_buffer.batch_update(batch_idx, sample_prios_v.data.cpu().numpy())
 
     writer.close()
 
