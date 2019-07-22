@@ -54,6 +54,10 @@ def main():
     net = model.DDQN(agent.env.observation_space.shape, agent.env.action_space.n).to(device)
     state_dict = torch.load(DEFAULT_ENV_NAME + "-best.dat")
     net.load_state_dict(state_dict)
+
+    net.sigma_weight = 0.0
+    net.sigma_bias = 0.0
+
     net.eval()
 
     frame_idx = 0
