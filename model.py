@@ -97,18 +97,66 @@ class DQN(nn.Module):
         x = self.conv(x).view(x.size()[0], -1)
         return self.classifier(x)
 
+class DDQN(nn.Module):
+
+    """Dueling Deep Q Netowrk"""
+
+    def __init__(self, input_shape, n_actions):
+        nn.Module.__init__(self)
+
+        self.conv = nn.Sequential(
+            nn.Conv2d(input_shape[0], 32, kernel_size=8, stride=4),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            nn.ReLU()
+        )
+
+        conv_out_size = self._get_conv_out_size(input_shape)
+        self.fc_adv = nn.Sequential(
+            NoisyLinear(conv_out_size, 512),
+            nn.ReLU(),
+            NoisyLinear(512, n_actions)
+        )
+        self.fc_val = nn.Sequential(
+            NoisyLinear(conv_out_size, 512),
+            nn.ReLU(),
+            NoisyLinear(512, 1)
+        )
+
+    def _get_conv_out_size(self, shape):
+        out = self.conv(torch.zeros(1, *shape))
+        return int(np.prod(out.size()))
+
+    def forward(self, x):
+        # fx = x.float() / 256
+        conv_out = self.conv(x).view(x.size()[0], -1)
+        val = self.fc_val(conv_out)
+        adv = self.fc_adv(conv_out)
+        return val + adv - adv.mean()
+
 
 def calc_loss(batch, batch_weights, net, tgt_net, gamma, double=False, device="cpu"):
     # states, actions, rewards, dones, next_states = zip(*batch)
     states, actions, rewards, dones, next_states = unpack_batch(batch)
 
     # create Tensors and move to GPU if available
-    states_v = torch.tensor(states).to(device)
-    actions_v = torch.tensor(actions).to(device)
-    rewards_v = torch.tensor(rewards).to(device)
-    next_states_v = torch.tensor(next_states).to(device)
-    batch_weights_v = torch.tensor(batch_weights).to(device)
-    done_mask = torch.ByteTensor(dones).to(device)
+    if device == "cuda":
+        states_v = torch.tensor(states)
+        actions_v = torch.tensor(actions)
+        rewards_v = torch.tensor(rewards)
+        next_states_v = torch.tensor(next_states)
+        batch_weights_v = torch.tensor(batch_weights)
+        done_mask = torch.ByteTensor(dones)
+    else:
+        states_v = torch.tensor(states).cuda(non_blocking=True)
+        actions_v = torch.tensor(actions).cuda(non_blocking=True)
+        rewards_v = torch.tensor(rewards).cuda(non_blocking=True)
+        next_states_v = torch.tensor(next_states).cuda(non_blocking=True)
+        batch_weights_v = torch.tensor(batch_weights).cuda(non_blocking=True)
+        done_mask = torch.ByteTensor(dones).cuda(non_blocking=True)
+
 
     # Q values predictions with net
     state_action_value = net(states_v).gather(1, actions_v.unsqueeze(-1)).squeeze(-1)
@@ -127,6 +175,7 @@ def calc_loss(batch, batch_weights, net, tgt_net, gamma, double=False, device="c
     losses_v = batch_weights_v.squeeze(-1) * (state_action_value - expected_state_action_values) ** 2
     return losses_v.mean(), losses_v + 1e-5
 
+# cant unpack with zip because it bottlenecks to +/- 5fps due to the copying
 def unpack_batch(batch):
     states, actions, rewards, dones, new_states = [], [], [], [], []
 

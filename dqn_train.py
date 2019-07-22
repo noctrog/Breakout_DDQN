@@ -10,16 +10,17 @@ import collections
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.multiprocessing as mp
 
 from tensorboardX import SummaryWriter
 
 
-DEFAULT_ENV_NAME = "PongNoFrameskip-v4"
+DEFAULT_ENV_NAME = "BreakoutNoFrameskip-v4"
 MEAN_REWARD_BOUND = 19.5
 
-GAMMA = 0.99
+GAMMA = 0.995
 BATCH_SIZE = 32
-REPLAY_SIZE = 10**4             # size of the replay buffer
+REPLAY_SIZE = 10000             # size of the replay buffer
 LR = 1e-4                       # learning rate used by the optimizer
 SYNC_TARGET_FRAMES = 10**3      # sync target network every k frames 
 REPLAY_START_SIZE = 10**4       # frames to wait before populating the replay buffer
@@ -88,7 +89,10 @@ def main():
     parser.add_argument("--reward", type=float, default=MEAN_REWARD_BOUND, help="Mean reward\
                         boundary to stop training. Default = %.2f" % MEAN_REWARD_BOUND)
     parser.add_argument("--play_steps", type=int, default=4, help="Number of plays each step (increases batch size)")
+    parser.add_argument("--clip", type=float, default=0.0, help="Clip norm to prevent exploding gradients")
     parser.add_argument("--double", default=False, action="store_true", help="Use Double DQN")
+    parser.add_argument("--dueling", default=False, action="store_true", help="Use Dueling DQN")
+
     args = parser.parse_args()
 
     # use CUDA if asked
@@ -98,8 +102,13 @@ def main():
     env = wrappers.make_env(args.env)
 
     # Create net and target net
-    net = model.DQN(env.observation_space.shape, env.action_space.n).to(device)
-    tgt_net = model.DQN(env.observation_space.shape, env.action_space.n).to(device)
+    if args.dueling:
+        net = model.DDQN(env.observation_space.shape, env.action_space.n).to(device)
+        tgt_net = model.DDQN(env.observation_space.shape, env.action_space.n).to(device)
+    else:
+        net = model.DQN(env.observation_space.shape, env.action_space.n).to(device)
+        tgt_net = model.DQN(env.observation_space.shape, env.action_space.n).to(device)
+
 
     # load saved model
     # state_dict = torch.load("./BreakoutNoFrameskip-v4-best.dat")
@@ -171,6 +180,10 @@ def main():
         batch_idx, batch, batch_weights = buffer.sample(BATCH_SIZE * args.play_steps)
         loss, sample_prios_v = model.calc_loss(batch, batch_weights, net, tgt_net, GAMMA, double=args.double, device=device)
         loss.backward()
+
+        if args.clip > 0.0:
+            torch.nn.utils.clip_grad_norm_(net.parameters(), args.clip)
+
         optimizer.step()
 
         agent.exp_buffer.batch_update(batch_idx, sample_prios_v.data.cpu().numpy())

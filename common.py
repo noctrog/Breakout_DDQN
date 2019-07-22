@@ -62,7 +62,7 @@ class SumTree:
 class PrioritizedReplayBuffer(object):
     PRB_alpha = 0.6
     PRB_beta = 0.4
-    PRB_beta_increment = 0.001
+    PRB_beta_increment = 0.00001
     PRB_max_error = 1.0
     PRB_e = 0.01
 
