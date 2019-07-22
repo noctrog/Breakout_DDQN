@@ -1,4 +1,4 @@
-# DDQN: Dueling Deep Q Learning (for Atari Breakout)
+# DDQN: Dueling Deep Q Network (for Atari Breakout)
 
 This project consists of a Dueling DQN model that learns to play Breakout.
 
