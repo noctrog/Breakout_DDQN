@@ -6,7 +6,7 @@ For training, the model is fed with a prioritized buffer, so it can learn faster
 Moreover, noisy nets are used instead of epsilon-greedy, as it makes the classifier automatically
 adjust for exploration thus reducing hyperparameter count.
 
-![](https://media.giphy.com/media/jt8L43CbwifMoocXTV/giphy.gif)
+![](https://media.giphy.com/media/lQbIVzcibAxLeuseWy/giphy.gif)
 
 ## Params
 
